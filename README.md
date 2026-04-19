@@ -1,3 +1,5 @@
+This powershell script was created using claude AI.
+
 # Combine-Archives.ps1
 
 A PowerShell script that automatically scans a folder for split archive parts and combines or extracts them — with live progress bars, speed readout, and ETA.
