@@ -133,7 +133,7 @@ function Draw-Header {
     Draw-Line
     Draw-Blank
     Draw-Title "Combine-Archives"
-    Draw-Title "Split Archive Combiner v1.1"
+    Draw-Title "Split Archive Combiner v1.2"
     Draw-Blank
     Draw-Line
 }
@@ -209,6 +209,7 @@ function Select-Archives {
         BinaryParts  = "ZIP/Binary"
         MultiPartRar = "Multi-RAR "
         OldStyleRar  = "Old RAR   "
+        SplitZip     = "Split ZIP "
     }
 
     Draw-Section "Select Archives to Process"
@@ -219,7 +220,7 @@ function Select-Archives {
     # Pre-calculate sizes for all groups so we can align columns
     $groupMeta = @()
     foreach ($g in $Groups) {
-        $bytes = ($g.Parts | ForEach-Object { (Get-Item $_).Length } | Measure-Object -Sum).Sum
+        $bytes = [long]($g.Parts | ForEach-Object { (Get-Item -LiteralPath $_).Length } | Measure-Object -Sum).Sum
         $groupMeta += [PSCustomObject]@{ Group = $g; Bytes = $bytes; SizeStr = Format-Bytes $bytes }
     }
 
@@ -262,7 +263,7 @@ function Select-Archives {
 
     # Footer grand total
     Write-Host "  $("-" * 66)" -ForegroundColor DarkCyan
-    $grandBytes = ($groupMeta | ForEach-Object { $_.Bytes } | Measure-Object -Sum).Sum
+    $grandBytes = [long]($groupMeta | ForEach-Object { $_.Bytes } | Measure-Object -Sum).Sum
     Write-Host "  Total if all selected: " -ForegroundColor Gray -NoNewline
     Write-Host (Format-Bytes $grandBytes) -ForegroundColor Yellow
 
@@ -415,7 +416,7 @@ function Join-BinaryParts {
 
     $bufferSize   = $BufferSizeMB * 1024 * 1024
     $buffer       = New-Object byte[] $bufferSize
-    $totalBytes   = ($Parts | ForEach-Object { (Get-Item $_).Length } | Measure-Object -Sum).Sum
+    $totalBytes   = [long]($Parts | ForEach-Object { (Get-Item -LiteralPath $_).Length } | Measure-Object -Sum).Sum
     $writtenTotal = [long]0
     $partIndex    = 0
     $partCount    = $Parts.Count
@@ -436,10 +437,10 @@ function Join-BinaryParts {
         foreach ($part in $Parts) {
             $partIndex++
             $partName    = Split-Path $part -Leaf
-            $partSize    = (Get-Item $part).Length
+            $partSize    = [long](Get-Item -LiteralPath $part).Length
             $writtenPart = [long]0
 
-            $overallPct = [math]::Min([int](($writtenTotal / [math]::Max($totalBytes, 1)) * 100), 100)
+            $overallPct = [math]::Min([int](($writtenTotal / [math]::Max([long]$totalBytes, [long]1)) * 100), 100)
             Show-Progress -Id 0 -Activity "Combining: $ArchiveName" `
                 -Status  "Part $partIndex of $partCount  |  $(Format-Bytes $writtenTotal) of $(Format-Bytes $totalBytes)" `
                 -Percent $overallPct
@@ -457,7 +458,7 @@ function Join-BinaryParts {
                     $writtenPart  += $read
                     $writtenTotal += $read
 
-                    $partPct = [math]::Min([int](($writtenPart / [math]::Max($partSize, 1)) * 100), 100)
+                    $partPct = [math]::Min([int](($writtenPart / [math]::Max([long]$partSize, [long]1)) * 100), 100)
                     $elapsed = $stopwatch.Elapsed.TotalSeconds
 
                     if ($elapsed -gt 0) {
@@ -515,31 +516,41 @@ function Invoke-7Zip {
 
 function Get-ArchiveGroups {
     param([string]$Path)
-    $allFiles = Get-ChildItem -Path $Path -File
+    $allFiles = Get-ChildItem -LiteralPath $Path -File
     $groups   = @{}
 
     foreach ($file in $allFiles) {
         $name = $file.Name
         $full = $file.FullName
 
+        # Pattern 1: file.zip.001 / file.rar.001 / file.tar.001
         if ($name -match '^(.+\.(zip|rar|tar|gz|7z))\.\d+$') {
             $base = $Matches[1]
             if (-not $groups[$base]) { $groups[$base] = @{ Type = "BinaryParts"; Parts = @() } }
             $groups[$base].Parts += $full; continue
         }
+        # Pattern 2: file.001 / file.002 (HJSplit / generic)
         if ($name -match '^(.+)\.\d{3,}$') {
             $base = $Matches[1]
             if (-not $groups[$base]) { $groups[$base] = @{ Type = "BinaryParts"; Parts = @() } }
             $groups[$base].Parts += $full; continue
         }
+        # Pattern 3: file.part1.rar / file.part01.rar
         if ($name -match '^(.+)\.part\d+\.rar$') {
             $base = $Matches[1]
             if (-not $groups[$base]) { $groups[$base] = @{ Type = "MultiPartRar"; Parts = @() } }
             $groups[$base].Parts += $full; continue
         }
+        # Pattern 4: old-style RAR -- file.rar + file.r00, file.r01
         if ($name -match '^(.+)\.(rar|r\d+)$') {
             $base = $Matches[1]
             if (-not $groups[$base]) { $groups[$base] = @{ Type = "OldStyleRar"; Parts = @() } }
+            $groups[$base].Parts += $full; continue
+        }
+        # Pattern 5: split ZIP -- file.z01, file.z02 ... + file.zip (WinZip/7-Zip split)
+        if ($name -match '^(.+)\.(z\d+|zip)$') {
+            $base = $Matches[1]
+            if (-not $groups[$base]) { $groups[$base] = @{ Type = "SplitZip"; Parts = @() } }
             $groups[$base].Parts += $full; continue
         }
     }
@@ -574,7 +585,7 @@ function Invoke-CombineGroup {
             if ($DryRun) { Write-Dry "Would concat $($parts.Count) parts -> $outFile"; return "DryRun" }
             try {
                 Join-BinaryParts -Parts $parts -OutputFile $outFile -ArchiveName $base
-                Write-OK "Created: $outFile  ($(Format-Bytes (Get-Item $outFile).Length))"
+                Write-OK "Created: $outFile  ($(Format-Bytes ([long](Get-Item -LiteralPath $outFile).Length)))"
                 if ($DeletePartsAfter) {
                     $parts | ForEach-Object { Remove-Item $_ -Force; Write-Info "Deleted: $(Split-Path $_ -Leaf)" }
                 }
@@ -590,6 +601,20 @@ function Invoke-CombineGroup {
                 $parts | Where-Object { $_ -match '\.rar$' } | Select-Object -First 1
             } else { $parts[0] }
             if (-not $firstPart) { $firstPart = $parts[0] }
+            if ($DryRun) { Write-Dry "Would run 7-Zip on: $(Split-Path $firstPart -Leaf)"; return "DryRun" }
+            if (Invoke-7Zip -FirstPart $firstPart) {
+                Write-OK "Extracted: $base"
+                if ($DeletePartsAfter) {
+                    $parts | ForEach-Object { Remove-Item $_ -Force; Write-Info "Deleted: $(Split-Path $_ -Leaf)" }
+                }
+                return "Success"
+            }
+            return "Failed"
+        }
+        # Split ZIP (.z01 / .z02 ... + .zip) — pass the .zip to 7-Zip which handles the rest
+        "SplitZip" {
+            $firstPart = $parts | Where-Object { $_ -match '\.zip$' } | Select-Object -First 1
+            if (-not $firstPart) { $firstPart = ($parts | Sort-Object)[0] }
             if ($DryRun) { Write-Dry "Would run 7-Zip on: $(Split-Path $firstPart -Leaf)"; return "DryRun" }
             if (Invoke-7Zip -FirstPart $firstPart) {
                 Write-OK "Extracted: $base"
@@ -775,9 +800,9 @@ function Start-InteractiveMode {
 
     # Show selected archives
     Draw-Section "Selected Archives ($($groups.Count) of $($allGroups.Count))"
-    $typeLabel = @{ BinaryParts = "ZIP/Binary"; MultiPartRar = "Multi-RAR "; OldStyleRar = "Old RAR   " }
+    $typeLabel = @{ BinaryParts = "ZIP/Binary"; MultiPartRar = "Multi-RAR "; OldStyleRar = "Old RAR   "; SplitZip = "Split ZIP " }
     foreach ($g in $groups) {
-        $totalSize = Format-Bytes (($g.Parts | ForEach-Object { (Get-Item $_).Length }) | Measure-Object -Sum).Sum
+        $totalSize = Format-Bytes ([long](($g.Parts | ForEach-Object { (Get-Item -LiteralPath $_).Length }) | Measure-Object -Sum).Sum)
         Write-Host "  [" -ForegroundColor DarkCyan -NoNewline
         Write-Host $typeLabel[$g.Type] -ForegroundColor Cyan -NoNewline
         Write-Host "]  " -ForegroundColor DarkCyan -NoNewline

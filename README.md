@@ -1,4 +1,4 @@
-# Combine-Archives.ps1
+# Combine-Archives.ps1 · v1.2
 
 A PowerShell script that automatically scans a folder for split archive parts and combines or extracts them — with an interactive step-by-step menu, archive selection, live progress bars, speed readout, and ETA.
 
@@ -15,6 +15,7 @@ A PowerShell script that automatically scans a folder for split archive parts an
 - Optional cleanup of part files after a successful combine
 - No external dependencies for ZIP/binary splits
 - Auto-detects 7-Zip for RAR extraction
+- Handles filenames with special characters including brackets `[ ]`
 - Full command-line parameter support for scripting/automation
 
 ---
@@ -27,16 +28,17 @@ A PowerShell script that automatically scans a folder for split archive parts an
 | HJSplit / 7-Zip splits | `archive.001`, `archive.002` ... |
 | Multi-part RAR | `archive.part1.rar`, `archive.part01.rar` ... |
 | Old-style RAR | `archive.rar` + `archive.r00`, `archive.r01` ... |
+| Split ZIP (WinZip/7-Zip) | `archive.z01`, `archive.z02` ... + `archive.zip` |
 
 ZIP and generic binary splits are handled entirely by PowerShell — no extra tools needed.
-RAR files require [7-Zip](https://www.7-zip.org) to be installed.
+Split ZIP and RAR files require [7-Zip](https://www.7-zip.org) to be installed.
 
 ---
 
 ## Requirements
 
 - Windows PowerShell 5.1 or PowerShell 7+
-- [7-Zip](https://www.7-zip.org) *(only required for RAR files)*
+- [7-Zip](https://www.7-zip.org) *(required for RAR and Split ZIP `.z01` files)*
 
 ---
 
@@ -243,6 +245,37 @@ Get-Help .\Combine-Archives.ps1 -Examples
 - If an output file already exists it will be skipped — delete it first to re-combine
 - If a combine fails partway through, any incomplete output file is automatically removed
 - In non-interactive / scripted mode all detected archives are processed without prompting
+
+---
+
+## Changelog
+
+### v1.2
+- **Fix:** All file size calculations now use explicit `[long]` (64-bit) casting throughout —
+  previously `Measure-Object -Sum` could silently downcast `Int64` to `Int32`, causing an
+  overflow error on archives larger than ~2.1 GB total
+- **Fix:** Replaced all `Get-Item` and `Get-ChildItem` calls with `-LiteralPath` variants —
+  previously filenames containing square brackets (e.g. `Purple Teaming [BlackHat].7z`)
+  were misinterpreted as PowerShell wildcard patterns, returning 0 bytes and failing to combine
+- **Added:** Support for Split ZIP format (`.z01`, `.z02` ... + `.zip`) created by WinZip and 7-Zip
+
+### v1.1
+- **Added:** Interactive TUI menu (5-step guided flow)
+- **Added:** Numbered archive selection with range support (`1,3`, `2-4`, `1,3-5`)
+- **Added:** Size and cumulative size columns in archive selection list
+- **Added:** Dry-run follow-up prompt — offer to proceed with real run immediately after preview
+- **Added:** ISE detection with text-based progress fallback
+- **Added:** `-NonInteractive` switch for scripted/scheduled use
+- **Fix:** `Show-Settings` inline `if` expressions rewritten for PowerShell 5.1 compatibility
+
+### v1.0
+- Initial release
+- Chunked streaming for files larger than 2 GB
+- Dual nested progress bars with MB/s speed and ETA
+- Supports ZIP binary splits, HJSplit, multi-part RAR, old-style RAR
+- Auto-detects 7-Zip
+- `-DryRun`, `-DeletePartsAfter`, `-BufferSizeMB` parameters
+- Full `Get-Help` documentation block
 
 ---
 
