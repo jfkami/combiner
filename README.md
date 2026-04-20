@@ -1,4 +1,4 @@
-# Combine-Archives.ps1 · v1.3
+# Combine-Archives.ps1 · v1.4
 
 A PowerShell script that automatically scans a folder for split archive parts and combines or extracts them — with an interactive step-by-step menu, archive selection, live progress bars, speed readout, and ETA.
 
@@ -267,10 +267,19 @@ Get-Help .\Combine-Archives.ps1 -Examples
 - If an output file already exists it will be skipped — delete it first to re-combine
 - If a combine fails partway through, any incomplete output file is automatically removed
 - In non-interactive / scripted mode all detected archives are processed without prompting
+- Before combining, each archive is checked for missing parts — gaps in the sequence are reported with the exact missing filenames and the archive is skipped rather than producing a corrupt output
 
 ---
 
 ## Changelog
+
+### v1.4
+- **Added:** Pre-combine integrity check — verifies no parts are missing before attempting
+  to combine. Handles all supported formats (numeric sequences, multi-part RAR,
+  old-style RAR, split ZIP). Missing parts are listed by filename so you know exactly
+  what to locate.
+- **Added:** `Incomplete` counter in summary — archives skipped due to missing parts are
+  listed separately from failures, with a reminder to locate the missing files and re-run.
 
 ### v1.3
 - **Docs:** Expanded Installation section — explains `Unblock-File` vs `Set-ExecutionPolicy`,

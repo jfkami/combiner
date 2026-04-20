@@ -133,7 +133,7 @@ function Draw-Header {
     Draw-Line
     Draw-Blank
     Draw-Title "Combine-Archives"
-    Draw-Title "Split Archive Combiner v1.3"
+    Draw-Title "Split Archive Combiner v1.4"
     Draw-Blank
     Draw-Line
 }
@@ -568,6 +568,133 @@ function Get-ArchiveGroups {
 #  PROCESS ONE GROUP
 # =============================================================================
 
+# =============================================================================
+#  INTEGRITY CHECK  — verify no parts are missing before combining
+# =============================================================================
+
+function Test-ArchiveIntegrity {
+    param([PSCustomObject]$Group)
+    # Returns a PSCustomObject: { OK = bool; Missing = string[] }
+
+    $type  = $Group.Type
+    $parts = $Group.Parts
+    $names = $parts | ForEach-Object { Split-Path $_ -Leaf }
+    $missing = @()
+
+    switch ($type) {
+
+        # ── Numeric sequences: .001 .002 .003 / .zip.001 .zip.002 etc. ───────
+        "BinaryParts" {
+            # Extract the numeric extensions and find min/max
+            $numbers = @()
+            foreach ($n in $names) {
+                if ($n -match '\.(\d+)$') { $numbers += [int]$Matches[1] }
+            }
+            if ($numbers.Count -eq 0) { break }
+            $numbers = $numbers | Sort-Object
+            $min = $numbers[0]
+            $max = $numbers[-1]
+
+            # Build the base name (everything before the numeric extension)
+            $sampleName = $names | Where-Object { $_ -match '\.(\d+)$' } | Select-Object -First 1
+            $sampleName -match '^(.+)\.(\d+)$' | Out-Null
+            $basePart  = $Matches[1]
+            $padWidth  = $Matches[2].Length   # preserve leading-zero padding width
+
+            for ($i = $min; $i -le $max; $i++) {
+                $expected = "$basePart.$($i.ToString().PadLeft($padWidth, '0'))"
+                if ($names -notcontains $expected) {
+                    $missing += $expected
+                }
+            }
+        }
+
+        # ── Multi-part RAR: .part1.rar .part2.rar etc. ────────────────────────
+        "MultiPartRar" {
+            $numbers = @()
+            foreach ($n in $names) {
+                if ($n -match '\.part(\d+)\.rar$') { $numbers += [int]$Matches[1] }
+            }
+            if ($numbers.Count -eq 0) { break }
+            $numbers = $numbers | Sort-Object
+            $min = $numbers[0]
+            $max = $numbers[-1]
+
+            # Detect zero-padded width (e.g. part01 vs part1)
+            $sampleName = $names | Where-Object { $_ -match '\.part(\d+)\.rar$' } | Select-Object -First 1
+            $sampleName -match '\.part(\d+)\.rar$' | Out-Null
+            $padWidth  = $Matches[1].Length
+            $sampleName -match '^(.+)\.part\d+\.rar$' | Out-Null
+            $basePart  = $Matches[1]
+
+            for ($i = $min; $i -le $max; $i++) {
+                $expected = "$basePart.part$($i.ToString().PadLeft($padWidth, '0')).rar"
+                if ($names -notcontains $expected) {
+                    $missing += $expected
+                }
+            }
+        }
+
+        # ── Old-style RAR: .rar + .r00 .r01 ... ──────────────────────────────
+        "OldStyleRar" {
+            # Must have the .rar file
+            $basePart = $Group.Name
+            $rarFile  = "$basePart.rar"
+            if ($names -notcontains $rarFile) { $missing += $rarFile }
+
+            # Find numeric range of .rNN parts
+            $numbers = @()
+            foreach ($n in $names) {
+                if ($n -match '\.r(\d+)$') { $numbers += [int]$Matches[1] }
+            }
+            if ($numbers.Count -gt 0) {
+                $numbers  = $numbers | Sort-Object
+                $min      = $numbers[0]
+                $max      = $numbers[-1]
+                $padWidth = ($names | Where-Object { $_ -match '\.r(\d+)$' } |
+                             Select-Object -First 1) -replace '^.+\.r(\d+)$','$1' |
+                             ForEach-Object { $_.Length }
+
+                for ($i = $min; $i -le $max; $i++) {
+                    $expected = "$basePart.r$($i.ToString().PadLeft($padWidth, '0'))"
+                    if ($names -notcontains $expected) {
+                        $missing += $expected
+                    }
+                }
+            }
+        }
+
+        # ── Split ZIP: .z01 .z02 ... + .zip ──────────────────────────────────
+        "SplitZip" {
+            $basePart = $Group.Name
+            # Must have the .zip file
+            if ($names -notcontains "$basePart.zip") { $missing += "$basePart.zip" }
+
+            $numbers = @()
+            foreach ($n in $names) {
+                if ($n -match '\.z(\d+)$') { $numbers += [int]$Matches[1] }
+            }
+            if ($numbers.Count -gt 0) {
+                $numbers  = $numbers | Sort-Object
+                $min      = $numbers[0]
+                $max      = $numbers[-1]
+                $padWidth = ($names | Where-Object { $_ -match '\.z(\d+)$' } |
+                             Select-Object -First 1) -replace '^.+\.z(\d+)$','$1' |
+                             ForEach-Object { $_.Length }
+
+                for ($i = $min; $i -le $max; $i++) {
+                    $expected = "$basePart.z$($i.ToString().PadLeft($padWidth, '0'))"
+                    if ($names -notcontains $expected) {
+                        $missing += $expected
+                    }
+                }
+            }
+        }
+    }
+
+    return [PSCustomObject]@{ OK = ($missing.Count -eq 0); Missing = $missing }
+}
+
 function Invoke-CombineGroup {
     param([PSCustomObject]$Group)
 
@@ -634,14 +761,33 @@ function Invoke-CombineGroup {
 
 function Invoke-AllGroups {
     param([object[]]$Groups)
-    $results = @{ Success = 0; Skipped = 0; Failed = 0; DryRun = 0 }
+    $results = @{ Success = 0; Skipped = 0; Failed = 0; DryRun = 0; Incomplete = 0 }
+    $incompleteList = [System.Collections.Generic.List[string]]::new()
+
     foreach ($group in $Groups) {
         Write-Host ""
         Write-Host "  --> $($group.Name)" -ForegroundColor Cyan
         Write-Host "      $($group.Parts.Count) parts  |  $($group.Type)" -ForegroundColor DarkGray
+
+        # Integrity check before attempting to combine
+        $check = Test-ArchiveIntegrity -Group $group
+        if (-not $check.OK) {
+            Write-Host "  [INCOMPLETE] Missing parts detected:" -ForegroundColor Red
+            foreach ($m in $check.Missing) {
+                Write-Host "    - $m" -ForegroundColor DarkRed
+            }
+            Write-Host "  Skipping combine for: $($group.Name)" -ForegroundColor Red
+            $results.Incomplete++
+            $incompleteList.Add($group.Name)
+            continue
+        }
+
         $outcome = Invoke-CombineGroup -Group $group
         $results[$outcome]++
     }
+
+    # Attach the list of incomplete archives to the results for summary display
+    $results['_IncompleteList'] = $incompleteList
     return $results
 }
 
@@ -659,11 +805,21 @@ function Show-Summary {
     Draw-Blank
     Draw-Line
     Write-Host ""
-    Write-Host "  Success  : $($Results.Success)" -ForegroundColor Green
-    Write-Host "  Skipped  : $($Results.Skipped)" -ForegroundColor Yellow
-    Write-Host "  Failed   : $($Results.Failed)"  -ForegroundColor Red
+    Write-Host "  Success    : $($Results.Success)"    -ForegroundColor Green
+    Write-Host "  Skipped    : $($Results.Skipped)"    -ForegroundColor Yellow
+    Write-Host "  Failed     : $($Results.Failed)"     -ForegroundColor Red
+    Write-Host "  Incomplete : $($Results.Incomplete)" -ForegroundColor $(if ($Results.Incomplete -gt 0) { "Red" } else { "DarkGray" })
     if ($WasDryRun) {
-        Write-Host "  Dry runs : $($Results.DryRun)" -ForegroundColor Magenta
+        Write-Host "  Dry runs   : $($Results.DryRun)" -ForegroundColor Magenta
+    }
+    if ($Results.Incomplete -gt 0 -and $Results['_IncompleteList'].Count -gt 0) {
+        Write-Host ""
+        Write-Host "  Archives skipped due to missing parts:" -ForegroundColor Red
+        foreach ($name in $Results['_IncompleteList']) {
+            Write-Host "    - $name" -ForegroundColor DarkRed
+        }
+        Write-Host ""
+        Write-Host "  Locate the missing part files and re-run to combine these archives." -ForegroundColor Yellow
     }
     Write-Host ""
     Draw-Line
