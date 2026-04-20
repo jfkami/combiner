@@ -133,7 +133,7 @@ function Draw-Header {
     Draw-Line
     Draw-Blank
     Draw-Title "Combine-Archives"
-    Draw-Title "Split Archive Combiner v1.2"
+    Draw-Title "Split Archive Combiner v1.3"
     Draw-Blank
     Draw-Line
 }

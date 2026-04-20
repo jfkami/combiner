@@ -1,4 +1,4 @@
-# Combine-Archives.ps1 · v1.2
+# Combine-Archives.ps1 · v1.3
 
 A PowerShell script that automatically scans a folder for split archive parts and combines or extracts them — with an interactive step-by-step menu, archive selection, live progress bars, speed readout, and ETA.
 
@@ -44,17 +44,39 @@ Split ZIP and RAR files require [7-Zip](https://www.7-zip.org) to be installed.
 
 ## Installation
 
-1. Download `Combine-Archives.ps1`
-2. Allow local scripts to run *(one-time, run PowerShell as Administrator)*:
+1. Download `Combine-Archives.ps1` to a folder of your choice (e.g. `C:\Scripts\`)
+
+2. **Unblock the file** — Windows automatically marks files downloaded from the internet
+   as untrusted. Run this once after downloading:
+
+```powershell
+Unblock-File "C:\Scripts\Combine-Archives.ps1"
+```
+
+> This removes the hidden **Mark of the Web** tag Windows attached when you downloaded
+> the file. It is the command-line equivalent of right-clicking the file → Properties →
+> ticking the **Unblock** checkbox. It only affects this one file and is the recommended
+> approach.
+
+3. **Allow local scripts to run** *(if not already set — one-time, per user)*:
 
 ```powershell
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
-> **Why is this needed?**
-> By default Windows blocks unsigned PowerShell scripts as a security measure.
-> `RemoteSigned` allows local scripts to run freely while still blocking unsigned
-> scripts downloaded from the internet. This only needs to be set once.
+> This tells PowerShell to allow local scripts to run while still blocking unsigned
+> scripts downloaded from the internet. Only needs to be set once per user account.
+
+### Which one do I need?
+
+| Situation | Solution |
+|---|---|
+| Script is blocked after downloading | `Unblock-File` ← **recommended, surgical** |
+| Script runs but execution policy error appears | `Set-ExecutionPolicy RemoteSigned` |
+| Both errors appear | Run both commands, `Unblock-File` first |
+
+Both are safe as long as you trust the script. `Unblock-File` is preferred because it
+targets only the specific file rather than relaxing policy for your entire account.
 
 ---
 
@@ -249,6 +271,10 @@ Get-Help .\Combine-Archives.ps1 -Examples
 ---
 
 ## Changelog
+
+### v1.3
+- **Docs:** Expanded Installation section — explains `Unblock-File` vs `Set-ExecutionPolicy`,
+  when to use each, and why neither presents a security risk when you trust the script
 
 ### v1.2
 - **Fix:** All file size calculations now use explicit `[long]` (64-bit) casting throughout —
