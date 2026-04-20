@@ -1,20 +1,21 @@
-This powershell script was created using claude AI.
-
 # Combine-Archives.ps1
 
-A PowerShell script that automatically scans a folder for split archive parts and combines or extracts them — with live progress bars, speed readout, and ETA.
+A PowerShell script that automatically scans a folder for split archive parts and combines or extracts them — with an interactive step-by-step menu, archive selection, live progress bars, speed readout, and ETA.
 
 ---
 
 ## Features
 
+- Interactive TUI menu when run without parameters
+- Numbered archive selection — choose which sets to process
 - Detects and groups split archive sets automatically
 - Supports files larger than 2 GB via chunked streaming
-- Dual nested progress bars with MB/s speed and time remaining
-- Dry-run mode to preview without touching any files
+- Progress bars in Windows Terminal / console; text fallback in PowerShell ISE
+- Dry-run mode with option to immediately proceed with a real run afterwards
 - Optional cleanup of part files after a successful combine
 - No external dependencies for ZIP/binary splits
 - Auto-detects 7-Zip for RAR extraction
+- Full command-line parameter support for scripting/automation
 
 ---
 
@@ -42,20 +43,89 @@ RAR files require [7-Zip](https://www.7-zip.org) to be installed.
 ## Installation
 
 1. Download `Combine-Archives.ps1`
-2. If required, allow script execution (one-time, current user only):
+2. Allow local scripts to run *(one-time, run PowerShell as Administrator)*:
 
 ```powershell
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
+> **Why is this needed?**
+> By default Windows blocks unsigned PowerShell scripts as a security measure.
+> `RemoteSigned` allows local scripts to run freely while still blocking unsigned
+> scripts downloaded from the internet. This only needs to be set once.
+
 ---
 
 ## Usage
 
+### Interactive mode (recommended)
+
+Just run the script with no arguments:
+
+```powershell
+.\Combine-Archives.ps1
+```
+
+You will be guided through 5 steps:
+
+```
+  Step 1 of 5 - Source Folder
+  Step 2 of 5 - Select Archives
+  Step 3 of 5 - Output Folder
+  Step 4 of 5 - Options
+  Step 5 of 5 - Combining
+```
+
+### Archive Selection
+
+After scanning, all detected archive sets are shown as a numbered list.
+You can choose exactly which ones to process:
+
+```
+  Step 2 of 5 - Select Archives
+  --------------------------------
+  Found 4 archive set(s) in: D:\Downloads
+
+  [ ##]  Type          Name                  Pts  Size      Cumulative
+  ------------------------------------------------------------------
+  [  1]  ZIP/Binary    movie.zip               5  4.80 GB   4.80 GB
+  [  2]  Multi-RAR     tv.show.part1.rar       8  7.20 GB  12.00 GB
+  [  3]  ZIP/Binary    software.zip            2  980 MB   12.96 GB
+  [  4]  Old RAR       backup.rar              3  2.10 GB  15.06 GB
+  ------------------------------------------------------------------
+  Total if all selected: 15.06 GB
+
+  Selection > 1,3          <- individual numbers
+  Selection > 2-4          <- a range
+  Selection > 1,3-4        <- mix of both
+  Selection >              <- press Enter to select all
+  Selection > a            <- also selects all
+  Selection > n            <- cancel / select none
+```
+
+### After a Dry Run
+
+When dry-run mode is used, the script will ask before exiting whether you want to immediately proceed with a real run — no need to re-enter anything:
+
+```
+  Dry Run Complete
+  ----------------
+  Dry runs : 2
+
+  Everything above was a preview. No files were written.
+
+  Would you like to proceed with a real run using the same settings? [y/N] >
+```
+
+### Command-line / scripted mode
+
+Pass `-FolderPath` (or any parameter) to skip the interactive menu entirely.
+In this mode all detected archives are processed without prompting.
+
 ```powershell
 .\Combine-Archives.ps1 [[-FolderPath] <string>] [[-OutputFolder] <string>]
                        [[-SevenZipPath] <string>] [[-BufferSizeMB] <int>]
-                       [-DryRun] [-DeletePartsAfter]
+                       [-DryRun] [-DeletePartsAfter] [-NonInteractive]
 ```
 
 ---
@@ -64,18 +134,60 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `-FolderPath` | string | `.` (current dir) | Folder to scan for split archive parts |
+| `-FolderPath` | string | *(interactive prompt)* | Folder to scan for split archive parts |
 | `-OutputFolder` | string | same as `-FolderPath` | Folder to save combined/extracted files |
 | `-SevenZipPath` | string | auto-detected | Full path to `7z.exe` if not in a standard location |
-| `-BufferSizeMB` | int | `64` | Read/write buffer size in MB. Increase for faster copies on systems with more RAM |
+| `-BufferSizeMB` | int | `64` | Read/write buffer size in MB (see table below) |
 | `-DryRun` | switch | off | Preview mode — shows what would happen without doing anything |
 | `-DeletePartsAfter` | switch | off | Delete part files after a successful combine or extract |
+| `-NonInteractive` | switch | off | Force non-interactive mode even without parameters |
+
+---
+
+## Buffer Size Guide
+
+The buffer controls how much data is read and written at a time. A larger buffer can improve throughput on fast drives, but uses more RAM.
+
+| `-BufferSizeMB` | RAM used | Recommended for |
+|---|---|---|
+| `16` | 16 MB | Low-end systems or VMs with under 4 GB RAM |
+| `32` | 32 MB | Systems with 4 GB RAM |
+| `64` *(default)* | 64 MB | Systems with 8 GB RAM — good general default |
+| `128` | 128 MB | Systems with 16 GB RAM and fast NVMe/SSD |
+| `256` | 256 MB | Systems with 32 GB+ RAM, large archives, fast storage |
+| `512` | 512 MB | Workstations with 64 GB+ RAM, maximum throughput |
+
+> **Note:** Going above `256` rarely gives a meaningful speed boost unless you are working with very large files on very fast storage. The bottleneck is usually disk speed, not buffer size.
+
+---
+
+## Progress Display
+
+The script automatically detects the environment and adjusts accordingly.
+
+**Windows Terminal / PowerShell console** — native nested progress bars:
+```
+Combining: archive.zip
+[=================>        ] 68%   Part 3 of 5  |  4.2 GB of 6.1 GB
+
+  Writing part 3 of 5
+  [=============>            ] 54%
+  archive.zip.003  |  891.2 MB / 1.2 GB  |  487.3 MB/s  |  ~2s left
+```
+
+**PowerShell ISE** — inline text progress (ISE does not support native bars):
+```
+  Combining: archive.zip  (5 parts, 4.8 GB total)
+    Part 1/5  archive.zip.001  1.2 GB  [done]
+    Part 2/5  archive.zip.002  1.2 GB  [done]
+  [##############----------------]  47%  archive.zip.003 | 487.3 MB/s | ~2s left
+```
 
 ---
 
 ## Examples
 
-**Scan the current folder:**
+**Interactive mode:**
 ```powershell
 .\Combine-Archives.ps1
 ```
@@ -85,7 +197,7 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 .\Combine-Archives.ps1 -FolderPath "D:\Downloads"
 ```
 
-**Preview without combining anything:**
+**Preview without combining (then optionally proceed):**
 ```powershell
 .\Combine-Archives.ps1 -FolderPath "D:\Downloads" -DryRun
 ```
@@ -105,11 +217,6 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 .\Combine-Archives.ps1 -FolderPath "D:\Downloads" -SevenZipPath "C:\Tools\7z.exe"
 ```
 
-**Combine, save elsewhere, and clean up:**
-```powershell
-.\Combine-Archives.ps1 -FolderPath "D:\Downloads" -OutputFolder "D:\Out" -DeletePartsAfter
-```
-
 **Use a larger buffer for faster copying:**
 ```powershell
 .\Combine-Archives.ps1 -FolderPath "D:\Downloads" -BufferSizeMB 128
@@ -117,29 +224,7 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 ---
 
-## Progress Output
-
-While combining, two nested progress bars are shown:
-
-```
-Combining: archive.zip
-[=================>        ] 68%   Part 3 of 5  |  4.2 GB of 6.1 GB
-
-  Writing part 3 of 5
-  [=============>            ] 54%
-  archive.zip.003  |  891.2 MB / 1.2 GB  |  487.3 MB/s  |  ~2 s remaining
-```
-
-- **Outer bar** — overall progress across all parts (total bytes written vs total size)
-- **Inner bar** — current part being written, with transfer speed and estimated time remaining
-
-Both bars clear automatically on completion.
-
----
-
 ## Built-in Help
-
-Full parameter documentation is available directly in PowerShell:
 
 ```powershell
 Get-Help .\Combine-Archives.ps1
@@ -151,10 +236,13 @@ Get-Help .\Combine-Archives.ps1 -Examples
 
 ## Notes
 
-- Always use `-DryRun` first to confirm the script has detected your files correctly before combining
+- Run without any parameters for the guided interactive menu
+- Archive selection supports individual numbers (`1,3`), ranges (`2-4`), or a mix (`1,3-5`)
+- Press Enter or type `a` at the selection prompt to process all detected archives
+- After a dry run, the script offers to immediately proceed with a real run — no re-entry needed
 - If an output file already exists it will be skipped — delete it first to re-combine
 - If a combine fails partway through, any incomplete output file is automatically removed
-- The script processes multiple archive sets in a single run if more than one is found in the folder
+- In non-interactive / scripted mode all detected archives are processed without prompting
 
 ---
 
