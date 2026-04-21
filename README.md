@@ -1,3 +1,10 @@
+# Combine Archives
+
+![Downloads](https://img.shields.io/github/downloads/jfkami/combiner/total)
+![Stars](https://img.shields.io/github/stars/jfkami/combiner?style=social)
+![License](https://img.shields.io/github/license/jfkami/combiner)
+![Last Commit](https://img.shields.io/github/last-commit/jfkami/combiner)
+
 # Combine-Archives.ps1 · v1.4
 
 A PowerShell script that automatically scans a folder for split archive parts and combines or extracts them — with an interactive step-by-step menu, archive selection, live progress bars, speed readout, and ETA.
